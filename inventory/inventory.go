@@ -2,7 +2,7 @@
 // inventory published at usgs.entwine.io and selects, for a parcel polygon,
 // the EPT resource that covers it.
 //
-// Ingest source
+// # Ingest source
 //
 // A single FeatureCollection (DefaultSource) with one feature per EPT
 // resource:
@@ -12,7 +12,7 @@
 //
 // plus a WGS84 lon/lat coverage polygon.
 //
-// Caching
+// # Caching
 //
 // The collection is several MB, so it is cached on disk with an ETag /
 // Last-Modified sidecar (meta.json). Refresh issues a conditional GET:
@@ -23,7 +23,7 @@
 // removed so a data update is a visible event, not a silent behavior
 // change.
 //
-// Selection
+// # Selection
 //
 // A uniform world grid over the resource bboxes culls candidates; a
 // point-in-polygon test (even-odd over all rings, holes included)
@@ -91,10 +91,10 @@ type RefreshResult struct {
 type Resource struct {
 	Name  string
 	ID    int
-	Count int64 // total point count in the dataset
+	Count int64  // total point count in the dataset
 	URL   string // https://.../<name>/ept.json
-	Year  int   // acquisition year parsed from Name; 0 if unknown
-	Box   Box   // lon/lat bounds of the coverage geometry
+	Year  int    // acquisition year parsed from Name; 0 if unknown
+	Box   Box    // lon/lat bounds of the coverage geometry
 
 	rings [][][2]float64 // all rings (outers + holes), WGS84 lon/lat
 }
@@ -102,6 +102,12 @@ type Resource struct {
 // Box is an axis-aligned lon/lat box.
 type Box struct {
 	MinLon, MinLat, MaxLon, MaxLat float64
+}
+
+// Intersects reports whether the boxes overlap (touching edges count).
+func (a Box) Intersects(b Box) bool {
+	return a.MinLon <= b.MaxLon && b.MinLon <= a.MaxLon &&
+		a.MinLat <= b.MaxLat && b.MinLat <= a.MaxLat
 }
 
 // Contains reports whether the point is inside the box.
@@ -131,8 +137,9 @@ func (b Box) Extend(lon, lat float64) Box {
 // goroutines; all read methods are safe for concurrent use.
 type Inventory struct {
 	resources []Resource
-	grid      *grid
-	meta      Meta
+	//grid      *grid
+	boxes []Box
+	meta  Meta
 }
 
 // Open loads a cached inventory from dir without touching the network.
@@ -290,6 +297,7 @@ func NewFromBytes(data []byte) (*Inventory, error) {
 	}
 
 	resources := make([]Resource, 0, len(fc.Features))
+	boxes := make([]Box, 0, len(fc.Features))
 	for _, f := range fc.Features {
 		rings, err := decodeRings(f.Geometry.Type, f.Geometry.Coordinates)
 		if err != nil {
@@ -298,17 +306,22 @@ func NewFromBytes(data []byte) (*Inventory, error) {
 		if len(rings) == 0 {
 			return nil, fmt.Errorf("resource %q has no geometry", f.Properties.Name)
 		}
+		box := boxOfRings(rings)
 		resources = append(resources, Resource{
 			Name:  f.Properties.Name,
 			ID:    f.Properties.ID,
 			Count: f.Properties.Count,
 			URL:   f.Properties.URL,
 			Year:  parseYear(f.Properties.Name),
-			Box:   boxOfRings(rings),
+			Box:   box,
 			rings: rings,
 		})
+		boxes = append(boxes, box)
 	}
-	return &Inventory{resources: resources, grid: newGrid(resources)}, nil
+	if len(boxes) != len(resources) { // defensive: parallel arrays must stay in lockstep
+		return nil, fmt.Errorf("internal: boxes (%d) and resources (%d) out of sync", len(boxes), len(resources))
+	}
+	return &Inventory{resources: resources, boxes: boxes}, nil
 }
 
 // NewFromReader is NewFromBytes for a reader.

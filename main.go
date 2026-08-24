@@ -18,6 +18,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"strings"
 
 	gdal "github.com/usace-cloud-compute/go-gdal"
+	"github.com/usace-nsi/entwine-buildings/inventory"
 )
 
 // ---------------------------------------------------------------------------
@@ -798,7 +800,12 @@ func main() {
 	flagInventoryDir := flag.String("inventory-dir", "", "cache dir for the EPT resource inventory; auto-selects -ept when set and -ept is empty")
 
 	flag.Parse()
-
+	eptSet := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "ept-json" {
+			eptSet = true
+		}
+	})
 	if *parcel == "" {
 		fatal("-parcel parcel.geojson is required")
 	}
@@ -821,21 +828,30 @@ func main() {
 	if err != nil {
 		fatal("parcel: %v", err)
 	}
-if *flagInventoryDir != "" && *flagEpt == "" {
-    inv, res, err := inventory.Refresh(context.Background(), *flagInventoryDir, inventory.Client{})
-    if err != nil {
-        log.Fatalf("inventory: %v", err)
-    }
-    if res.Changed {
-        log.Printf("inventory updated: +%d -%d resources", len(res.Added), len(res.Removed))
-    }
-    sel := inv.SelectRings(rings...) // rings []ring from loadParcelRings
-    if !sel.Matched {
-        log.Fatalf("no EPT resource covers this parcel; use census-only placement")
-    }
-    *flagEpt = sel.Resource.URL
-    log.Printf("selected %s (zone %d, %s, %d pts)", sel.Resource.Name, sel.Zone, sel.Resource.URL, sel.Resource.Count)
-}
+	if *flagInventoryDir != "" && !eptSet {
+		inv, res, err := inventory.Refresh(context.Background(), *flagInventoryDir, inventory.Client{})
+		if err != nil {
+			// Network hiccup must not block a run when a snapshot exists.
+			if cached, oerr := inventory.Open(*flagInventoryDir); oerr == nil {
+				fmt.Printf("== inventory refresh failed (%v); using cached snapshot\n", err)
+				inv = cached
+			} else {
+				fatal("inventory: %v", err)
+			}
+		} else if res.Changed {
+			fmt.Printf("== inventory updated: +%d -%d resources\n", len(res.Added), len(res.Removed))
+		}
+		invRings := make([]inventory.Ring, len(rings))
+		for i, r := range rings {
+			invRings[i] = r // element-wise assignability holds, so this is fine
+		}
+		sel := inv.SelectRings(invRings...)
+		if !sel.Matched {
+			fatal("no EPT resource covers this parcel; use census-only placement")
+		}
+		*eptJSON = sel.Resource.URL
+		fmt.Printf("== selected %s (utm zone %d, %d pts)\n   %s\n", sel.Resource.Name, sel.Zone, sel.Resource.Count, sel.Resource.URL)
+	}
 	// EPT fetch filter: largest outer ring, WKT in EPSG:3857.
 	mainRing, maxA := rings[0], 0.0
 	for _, r := range rings {

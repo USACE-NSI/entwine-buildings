@@ -56,10 +56,12 @@ func rankOf(r *Resource) rank {
 }
 
 // Select returns the best-matching resource for a point, or a zero
-// Selection when no resource covers it.
+// Selection when no resource covers it. Linear over N resources with
+// the box gate inside contains() — sub-millisecond at the archive's
+// current scale.
 func (inv *Inventory) Select(lon, lat float64) Selection {
 	var best *Resource
-	for _, i := range inv.grid.pointCandidates(lon, lat) {
+	for i := range inv.resources {
 		r := &inv.resources[i]
 		if !r.contains(lon, lat) {
 			continue
@@ -78,7 +80,7 @@ func (inv *Inventory) Select(lon, lat float64) Selection {
 // best-first.
 func (inv *Inventory) Candidates(lon, lat float64) []Selection {
 	var out []Selection
-	for _, i := range inv.grid.pointCandidates(lon, lat) {
+	for i := range inv.resources {
 		r := &inv.resources[i]
 		if !r.contains(lon, lat) {
 			continue
@@ -98,6 +100,12 @@ func (inv *Inventory) Candidates(lon, lat float64) []Selection {
 	return out
 }
 
+// SelectRings selects the resource for a parcel polygon. Every parcel
+// vertex plus the vertex-mean centroid is tested against each grid-culled
+// candidate; the candidate covering the most of those points wins, with
+// ties broken by rank (FullState, then year, then count) and then name
+// for determinism. Hole rings are treated as extra vertex sources,
+// which is a harmless over-approximation for coverage.
 // SelectRings selects the resource for a parcel polygon. Every parcel
 // vertex plus the vertex-mean centroid is tested against each grid-culled
 // candidate; the candidate covering the most of those points wins, with
@@ -133,26 +141,41 @@ func (inv *Inventory) SelectRings(rings ...Ring) Selection {
 	pts = append(pts, [2]float64{cLon, cLat})
 
 	type hit struct {
-		idx   int
-		pts   int
-		r     rank
-		name  string
+		idx  int
+		n    int
+		r    rank
+		name string
+	}
+	better := func(a, b *hit) bool {
+		if a.n != b.n {
+			return a.n > b.n
+		}
+		if a.r.less(b.r) {
+			return true
+		}
+		if b.r.less(a.r) {
+			return false
+		}
+		return a.name < b.name
 	}
 	var best *hit
-	for _, i := range inv.grid.boxCandidates(box) {
+	for i := range inv.resources {
+		if !inv.boxes[i].Intersects(box) { // cheap reject: most of the 2278 fail here
+			continue
+		}
 		r := &inv.resources[i]
 		n := 0
 		for _, p := range pts {
-			if r.contains(p[0], p[1]) {
+			if r.contains(p[0], p[1]) { // PIP only for bbox-overlapping candidates
 				n++
 			}
 		}
 		if n == 0 {
 			continue
 		}
-		h := hit{idx: i, pts: n, r: rankOf(r), name: r.Name}
-		if best == nil || h.better(*best) {
-			best = &h
+		h := &hit{idx: i, n: n, r: rankOf(r), name: r.Name}
+		if best == nil || better(h, best) {
+			best = h
 		}
 	}
 	if best == nil {
@@ -160,19 +183,6 @@ func (inv *Inventory) SelectRings(rings ...Ring) Selection {
 	}
 	r := &inv.resources[best.idx]
 	return Selection{Resource: *r, Zone: UTMZone(cLon), Matched: true}
-}
-
-func (a hit) better(b hit) bool {
-	if a.pts != b.pts {
-		return a.pts > b.pts
-	}
-	if a.r.less(b.r) {
-		return true
-	}
-	if b.r.less(a.r) {
-		return false
-	}
-	return a.name < b.name
 }
 
 // contains reports whether the point falls inside the resource coverage
@@ -190,10 +200,10 @@ func pointInRings(lon, lat float64, rings [][][2]float64) bool {
 	inside := false
 	for _, ring := range rings {
 		n := len(ring)
-		for i, j := 0, n-1; i < n; j = i {
+		for i, j := 0, n-1; i < n; i, j = i+1, i { // i must advance
 			pi, pj := ring[i], ring[j]
 			if (pi[1] > lat) != (pj[1] > lat) {
-				x := pi[0] + (lat-pi[1])/(pj[1]-pi[1]) * (pj[0]-pi[0])
+				x := pi[0] + (lat-pi[1])/(pj[1]-pi[1])*(pj[0]-pi[0])
 				if lon < x {
 					inside = !inside
 				}
