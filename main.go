@@ -795,6 +795,8 @@ func main() {
 	orientRidge := flag.Bool("orient-ridge", true,
 		"orient boxes by roof-ridge bearing (top band of the cluster point cloud); falls back to full-cloud PCA when the ridge signal is weak. Disable with -orient-ridge=false")
 	debugComps := flag.Bool("debug-components", false, "write components.csv with per-building features for threshold tuning")
+	flagInventoryDir := flag.String("inventory-dir", "", "cache dir for the EPT resource inventory; auto-selects -ept when set and -ept is empty")
+
 	flag.Parse()
 
 	if *parcel == "" {
@@ -819,7 +821,21 @@ func main() {
 	if err != nil {
 		fatal("parcel: %v", err)
 	}
-
+if *flagInventoryDir != "" && *flagEpt == "" {
+    inv, res, err := inventory.Refresh(context.Background(), *flagInventoryDir, inventory.Client{})
+    if err != nil {
+        log.Fatalf("inventory: %v", err)
+    }
+    if res.Changed {
+        log.Printf("inventory updated: +%d -%d resources", len(res.Added), len(res.Removed))
+    }
+    sel := inv.SelectRings(rings...) // rings []ring from loadParcelRings
+    if !sel.Matched {
+        log.Fatalf("no EPT resource covers this parcel; use census-only placement")
+    }
+    *flagEpt = sel.Resource.URL
+    log.Printf("selected %s (zone %d, %s, %d pts)", sel.Resource.Name, sel.Zone, sel.Resource.URL, sel.Resource.Count)
+}
 	// EPT fetch filter: largest outer ring, WKT in EPSG:3857.
 	mainRing, maxA := rings[0], 0.0
 	for _, r := range rings {
