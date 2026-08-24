@@ -1,4 +1,4 @@
-module entwine-buildings
+module github.com/usace-nsi/entwine-buildings
 
 go 1.27
 
