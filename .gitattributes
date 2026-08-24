@@ -1,0 +1,5 @@
+# Dockerfile RUN continuations break if CRLF sneaks in on a Windows checkout
+**/Dockerfile text eol=lf
+*.sh text eol=lf
+*.go text
+*.json text
