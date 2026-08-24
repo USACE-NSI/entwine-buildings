@@ -1,0 +1,17 @@
+{
+  "name": "entwine-buildings (GDAL + Go 1.27)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=entwine-work,target=/work,type=volume"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go"]
+    }
+  },
+  "postCreateCommand": "gdalinfo --version && go version; docker version --format 'docker daemon: {{.Server.Version}}' || echo 'WARNING: docker socket not reachable'"
+}
