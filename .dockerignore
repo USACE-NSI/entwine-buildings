@@ -1,0 +1,6 @@
+out/
+work/
+*.laz
+*.tif
+*.csv
+.git/
