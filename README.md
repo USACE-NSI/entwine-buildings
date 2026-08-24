@@ -30,8 +30,34 @@ go build -o entwine-buildings .
 pdal/pdal image (use -workdir as its host mount point). Without it, the
 workdir is bind-mounted at the same path on a native Linux host.
 
-Example parcels live in example/ (parcel.geojson, res-parcel*.geojson,
-plus QGIS project files *.qmd for visual checks).
+### Choosing the EPT source
+
+The default EPT is the Iowa full-state archive
+(`https://s3-us-west-2.amazonaws.com/usgs-lidar-public/IA_FullState/ept.json`).
+For parcels in other states, either let the runner look the resource up or
+name the EPT file yourself:
+
+```bash
+# Auto-select: -inventory-dir points at a cache dir. The first run
+# downloads resources.geojson (a few MB) from usgs.entwine.io and
+# caches it; later runs use ETag/Last-Modified conditional GETs, and
+# a network failure falls back to the cached snapshot. The runner
+# prints which resource it picked (name, UTM zone, point count, URL)
+# and uses that resource's ept.json for the PDAL stages.
+./entwine-buildings -parcel example/res-parcel3.geojson \
+  -workdir /work -docker-volume entwine-work -inventory-dir inv-cache
+
+# Explicit: -ept-json names the EPT file directly and skips the
+# inventory lookup entirely — the cache is not consulted, even if
+# -inventory-dir is set at the same time.
+./entwine-buildings -parcel example/res-parcel3.geojson \
+  -workdir /work -docker-volume entwine-work \
+  -ept-json https://s3-us-west-2.amazonaws.com/usgs-lidar-public/ST_FullState/ept.json
+```
+
+If no inventory resource covers the parcel, the run stops with
+`no EPT resource covers this parcel; use census-only placement` —
+pass an explicit `-ept-json` in that case.
 
 ## Outputs (in the workdir)
 |file	|what|
@@ -65,7 +91,7 @@ pipeline1.json, pipeline2.json, pipeline3.json	generated PDAL pipelines, inspect
 |-flat-relief|	0.75|	roof relief (m) below which the roof is classified flat|
 |-snap-to-parcel|	1.25|	if the building's PCA eigenvalue ratio is below this, snap the box to the parcel's long axis (0 disables)|
 |-orient-ridge|	true|	orient boxes by the roof-ridge bearing (top 30% band of the cluster, P90 cut) when the band is line-like; otherwise fall back to full-cloud PCA|
-|-inventory-dir| ""|cache dir for the EPT resource inventory; auto-selects -ept when set and -ept is empty|
+|-inventory-dir| ""|cache dir for the EPT resource inventory; when set (and -ept-json is not given) the runner auto-selects the resource covering the parcel|
 |-debug-components|	false|	write components.csv with per-building features|
 
 
