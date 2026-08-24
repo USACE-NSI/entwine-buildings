@@ -65,18 +65,19 @@ pipeline1.json, pipeline2.json, pipeline3.json	generated PDAL pipelines, inspect
 |-flat-relief|	0.75|	roof relief (m) below which the roof is classified flat|
 |-snap-to-parcel|	1.25|	if the building's PCA eigenvalue ratio is below this, snap the box to the parcel's long axis (0 disables)|
 |-orient-ridge|	true|	orient boxes by the roof-ridge bearing (top 30% band of the cluster, P90 cut) when the band is line-like; otherwise fall back to full-cloud PCA|
+|-inventory-dir| ""|cache dir for the EPT resource inventory; auto-selects -ept when set and -ept is empty|
 |-debug-components|	false|	write components.csv with per-building features|
 
 
 ## How it works
 
-Go runner reprojects the largest parcel ring to EPSG:3857 with closed-form spherical Mercator (the EPT's storage CRS), and computes a parcel long-axis bearing (PCA of the ring) as a snap prior.
+Go runner reprojects the largest parcel ring to EPSG:3857 with closed-form spherical Mercator (the EPT's storage CRS), identifies the correct data from  and computes a parcel long-axis bearing (PCA of the ring) as a snap prior.
 
 PDAL pipeline 1 queries the EPT with the parcel polygon, reprojects to EPSG:26915, drops noise (ASPRS classes 7/12/18), preserves the original Classification as SourceClass, runs SMRF ground + nearest-neighbor HAG, sets DTM = Z - HAG, and writes parcel_cloud.laz.
 
 PDAL pipeline 2 reprojects to EPSG:4326 and writes dsm.tif (max Z, binned) and dtm.tif (IDW of the DTM) at -resolution over the parcel bbox + ∼20 m margin.
 
-PDAL pipeline 3 keeps points with Z - DTM > -threshold, 2D-clusters them (filters.cluster, min 30 points / 3 m tolerance), drops empty clusters, decimates 5:1, and writes buildings_points.csv in EPSG:4326 with intensity / return / source-class columns.
+PDAL pipeline 3 keeps points with Z - DTM > threshold, 2D-clusters them (filters.cluster, min 30 points / 3 m tolerance), drops empty clusters, decimates 5:1, and writes buildings_points.csv in EPSG:4326 with intensity / return / source-class columns.
 
 In-process Go (go-gdal raster only): groups points by ClusterID, merges clusters whose boxes overlap, and per building:
 orients the bounding box by the roof-ridge bearing (PCA of the top 30% band, P90 height cut) when the band is line-like (aspect ≥ 1.2); otherwise full-cloud PCA, with near-square buildings (eigenvalue ratio below -snap-to-parcel) snapped to the parcel bearing;

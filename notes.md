@@ -9,7 +9,7 @@ build host, because the `go-gdal` dependency is cgo:
 
     go build -o entwine-buildings .
 
-The repo no longer ships the old dev-container workflow (no Dockerfile).
+
 The only container step is the PDAL image, which the Go binary drives.
 
 ## Docker prep (one-time)
